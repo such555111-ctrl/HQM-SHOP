@@ -20,7 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import declarative_base, sessionmaker, scoped_session
 
 logging.basicConfig(level=logging.INFO)
-log = logging.getLogger("boris_britva_shop")
+log = logging.getLogger("hqm_shop")
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
@@ -31,7 +31,7 @@ if not BOT_TOKEN:
 BASE_URL = (os.environ.get("WEBHOOK_URL") or os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
 
 # Telegram-аккаунт менеджера (без @) — на него ведёт кнопка «Написать менеджеру».
-SHOP_CONTACT = (os.environ.get("SHOP_CONTACT") or "britvaboris1").lstrip("@").strip()
+SHOP_CONTACT = (os.environ.get("SHOP_CONTACT") or "HQManager1").lstrip("@").strip()
 
 # Пароль для входа в админ-панель (/admin). Задаётся в переменных окружения.
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
@@ -54,14 +54,14 @@ UPLOAD_DIR = os.path.join(APP_DIR, "uploads")   # только для разов
 
 # Доставка и самовывоз
 try:
-    DELIVERY_FEE = int(os.environ.get("DELIVERY_FEE", "59"))
+    DELIVERY_FEE = int(os.environ.get("DELIVERY_FEE", "200"))
 except ValueError:
-    DELIVERY_FEE = 59
+    DELIVERY_FEE = 200
 # Бесплатная доставка от этой суммы товаров (после промокода, до списания баллов). 0 — отключить.
 try:
-    FREE_DELIVERY_FROM = int(os.environ.get("FREE_DELIVERY_FROM", "990"))
+    FREE_DELIVERY_FROM = int(os.environ.get("FREE_DELIVERY_FROM", "0"))
 except ValueError:
-    FREE_DELIVERY_FROM = 990
+    FREE_DELIVERY_FROM = 0
 
 
 def delivery_fee_for(goods_total):
@@ -72,7 +72,7 @@ def delivery_fee_for(goods_total):
 
 
 PICKUP_POINTS = [
-    p.strip() for p in (os.environ.get("PICKUP_POINTS") or "Казань (личная доставка)").split(",") if p.strip()
+    p.strip() for p in (os.environ.get("PICKUP_POINTS") or "Самовывоз со склада").split(",") if p.strip()
 ]
 
 # Программа лояльности: 1 балл = 1 рубль
@@ -928,7 +928,7 @@ def apply_order_status(o, target):
     spend_acquired = False
     if want_spend and not have_spend and tg:
         try:
-            loyalty_apply(tg, spend, 0, 0, f"Оплата баллами, заказ BB-{o.get('id')}")
+            loyalty_apply(tg, spend, 0, 0, f"Оплата баллами, заказ HQ-{o.get('id')}")
         except ValueError:
             return "У клиента не хватает баллов, чтобы возобновить заказ"
         spend_acquired = True
@@ -937,7 +937,7 @@ def apply_order_status(o, target):
         err = reserve_stock(items)
         if err:
             if spend_acquired:
-                loyalty_revert(tg, spend, 0, 0, f"Возврат баллов, заказ BB-{o.get('id')}")
+                loyalty_revert(tg, spend, 0, 0, f"Возврат баллов, заказ HQ-{o.get('id')}")
                 o["loyalty_applied"] = False
             return err
         o["stock_deducted"] = True
@@ -948,13 +948,13 @@ def apply_order_status(o, target):
         o["stock_deducted"] = False
     if tg:
         if want_hold and not have_cb:
-            loyalty_apply(tg, 0, cb, total, f"Кешбэк за заказ BB-{o.get('id')}")
+            loyalty_apply(tg, 0, cb, total, f"Кешбэк за заказ HQ-{o.get('id')}")
             o["cashback_credited"] = True
         elif not want_hold and have_cb:
-            loyalty_revert(tg, 0, cb, total, f"Отмена кешбэка, заказ BB-{o.get('id')}")
+            loyalty_revert(tg, 0, cb, total, f"Отмена кешбэка, заказ HQ-{o.get('id')}")
             o["cashback_credited"] = False
         if not want_spend and o.get("loyalty_applied"):
-            loyalty_revert(tg, spend, 0, 0, f"Возврат баллов, заказ BB-{o.get('id')}")
+            loyalty_revert(tg, spend, 0, 0, f"Возврат баллов, заказ HQ-{o.get('id')}")
             o["loyalty_applied"] = False
     o["status"] = target
     return None
@@ -1027,15 +1027,60 @@ def on_order_moderation(call: types.CallbackQuery):
         try:
             if accepted:
                 cb = int(order.get("cashback") or 0)
-                bot.send_message(chat_id, f"✅ Ваш заказ BB-{oid} принят!\n\nМы свяжемся с вами в этом чате."
+                bot.send_message(chat_id, f"✅ Ваш заказ HQ-{oid} принят!\n\nМы свяжемся с вами в этом чате."
                                  + (f"\nНачислен кешбэк: {cb} б." if cb else ""))
             else:
                 sp = int(order.get("points_spent") or 0)
-                bot.send_message(chat_id, f"❌ К сожалению, заказ BB-{oid} отклонён."
+                bot.send_message(chat_id, f"❌ К сожалению, заказ HQ-{oid} отклонён."
                                  + (f"\nСписанные баллы ({sp} б.) возвращены." if sp else "")
                                  + "\nЕсли остались вопросы — напишите менеджеру.")
         except Exception as e:
             log.warning("Не удалось уведомить покупателя о статусе заказа: %s", e)
+
+
+
+BRAND_DIR = os.path.join(APP_DIR, "brand")
+_BRAND_CACHE = {}
+
+
+def _brand_bytes(name):
+    """Файл из brand/ (кэшируется в памяти). None, если файла нет."""
+    if name not in _BRAND_CACHE:
+        try:
+            with open(os.path.join(BRAND_DIR, name), "rb") as f:
+                _BRAND_CACHE[name] = f.read()
+        except OSError:
+            _BRAND_CACHE[name] = None
+    return _BRAND_CACHE[name]
+
+
+def setup_bot_profile():
+    """Один раз: описание бота и аватарка из brand/avatar.png (аватарку ставим, если Bot API это позволяет)."""
+    try:
+        with DocSession() as db:
+            if db.get(Meta, "bot_profile_v2"):
+                return
+        try:
+            bot.set_my_description("HQM | SHOP — vape shop. Цены ниже, чем у конкурентов, и выгодные предложения. Онлайн и предзаказ. 21+")
+            bot.set_my_short_description("HQM | SHOP — vape shop · 21+")
+        except Exception:
+            log.warning("Не удалось задать описание бота", exc_info=True)
+        avatar = _brand_bytes("avatar.png")
+        if avatar:
+            try:
+                from telebot import apihelper
+                import json as _json
+                apihelper._make_request(
+                    BOT_TOKEN, "setMyProfilePhoto", method="post",
+                    params={"photo": _json.dumps({"type": "static", "photo": "attach://avatar"})},
+                    files={"avatar": ("avatar.png", avatar, "image/png")})
+            except Exception:
+                log.warning("Аватарку бота не удалось поставить автоматически — задайте её в @BotFather (/setuserpic, файл brand/avatar.png)", exc_info=True)
+        with DocSession() as db:
+            db.add(Meta(key="bot_profile_v2", value=datetime.now(timezone.utc).isoformat()))
+            db.commit()
+    except Exception:
+        log.exception("Ошибка настройки профиля бота")
 
 
 # --- Telegram handlers -------------------------------------------------
@@ -1045,14 +1090,14 @@ def cmd_start(message: types.Message):
     if not BASE_URL:
         bot.send_message(
             message.chat.id,
-            "Борис Бритва Шоп: мини-апп ещё не сконфигурирован (не задан WEBHOOK_URL)."
+            "HQM SHOP: мини-апп ещё не сконфигурирован (не задан WEBHOOK_URL)."
         )
         return
 
     keyboard = types.InlineKeyboardMarkup()
     keyboard.add(
         types.InlineKeyboardButton(
-            text="🚀 Открыть Борис Бритва Шоп",
+            text="🚀 Открыть HQM SHOP",
             web_app=types.WebAppInfo(url=BASE_URL + "/")
         )
     )
@@ -1074,23 +1119,23 @@ def cmd_start(message: types.Message):
             )
         )
 
-    bot.send_message(
-        message.chat.id,
-        "🪒 *Борис Бритва Шоп*\n\n"
-        "*Казань. Всё оригинал.*\n"
-        "Выбирайте товары в каталоге.\n"
+    caption = (
+        "🖤 *HQM SHOP*\n\n"
+        "*Всё оригинал. Цены ниже, чем у конкурентов.*\n"
+        "Работаем онлайн и по предзаказам. Выбирайте товары в каталоге.\n"
         f"🚚 Доставка — {DELIVERY_FEE} ₽" + (f", при покупке от {FREE_DELIVERY_FROM} ₽ — бесплатно" if FREE_DELIVERY_FROM > 0 else "") + "\n"
-        "📦 Доставка по России — от Пятёрочки: получение на кассах или в постаматах\n\n"
-        "Нажмите кнопку ниже, чтобы открыть каталог и оформить заказ.",
-        reply_markup=keyboard,
-        parse_mode="Markdown",
+        "📍 Самовывоз со склада — бесплатно\n\n"
+        "Нажмите кнопку ниже, чтобы открыть каталог и оформить заказ.\n"
+        "_21+_"
     )
-
-
-
-@bot.message_handler(func=lambda m: True, content_types=["text"])
-def fallback(message: types.Message):
-    cmd_start(message)
+    photo = _brand_bytes("hero_bot.jpg")
+    if photo:
+        try:
+            bot.send_photo(message.chat.id, photo, caption=caption, reply_markup=keyboard, parse_mode="Markdown")
+            return
+        except Exception as e:
+            log.warning("Не удалось отправить фото в /start: %s", e)
+    bot.send_message(message.chat.id, caption, reply_markup=keyboard, parse_mode="Markdown")
 
 
 # --- Flask routes --------------------------------------------------------
@@ -1374,7 +1419,7 @@ def create_order():
             bot.send_message(
                 customer_chat_id,
                 "✅ Заказ оформлен!\n\n"
-                f"Номер заказа: BB-{new_id}\n"
+                f"Номер заказа: HQ-{new_id}\n"
                 f"{items_lines}\n\n"
                 f"{delivery_block}\n\n"
                 f"{discount_line}"
@@ -1387,7 +1432,7 @@ def create_order():
             log.warning("Не удалось отправить подтверждение покупателю: %s", e)
 
     admin_text = (
-        f"🛒 Новый заказ BB-{new_id}\n\n"
+        f"🛒 Новый заказ HQ-{new_id}\n\n"
         f"Клиент: {name}\n"
         f"Телефон: {phone}\n"
         + (f"Telegram: @{customer_username}\n" if customer_username else "")
@@ -1483,7 +1528,7 @@ def customer_cancel_order(oid):
 
     for admin_id in ADMIN_CHAT_IDS:
         try:
-            bot.send_message(admin_id, f"❌ Клиент отменил заказ BB-{oid}")
+            bot.send_message(admin_id, f"❌ Клиент отменил заказ HQ-{oid}")
         except Exception as e:
             log.warning("Не удалось уведомить администратора %s: %s", admin_id, e)
 
@@ -1571,6 +1616,13 @@ def uploaded_file(filename):
 @app.route("/admin", methods=["GET"])
 def admin_page():
     return send_from_directory(APP_DIR, "admin.html")
+
+
+@app.route("/brand/<path:filename>", methods=["GET"])
+def brand_file(filename):
+    resp = send_from_directory(os.path.join(APP_DIR, "brand"), filename)
+    resp.headers["Cache-Control"] = "public, max-age=86400"
+    return resp
 
 
 @app.route("/healthz", methods=["GET"])
@@ -1862,7 +1914,7 @@ def admin_message_customer(oid):
     try:
         bot.send_message(
             chat_id,
-            f"💬 Сообщение от Борис Бритва Шоп по заказу BB-{oid}:\n\n{text}"
+            f"💬 Сообщение от HQM SHOP по заказу HQ-{oid}:\n\n{text}"
         )
     except Exception as e:
         abort(400, description=f"Не удалось отправить сообщение: {e}")
@@ -2011,7 +2063,7 @@ def admin_message_question(qid):
     try:
         bot.send_message(
             chat_id,
-            f"💬 Ответ от Борис Бритва Шоп по товару «{q.get('product_name','')}»:\n\n{text}"
+            f"💬 Ответ от HQM SHOP по товару «{q.get('product_name','')}»:\n\n{text}"
         )
     except Exception as e:
         abort(400, description=f"Не удалось отправить ответ: {e}")
@@ -2055,6 +2107,7 @@ def setup_webhook():
 
 
 setup_webhook()
+setup_bot_profile()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
