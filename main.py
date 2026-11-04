@@ -83,7 +83,7 @@ def _env_float(name, default):
         return float(default)
 
 POINT_VALUE = _env_float("POINT_VALUE_RUB", 0.5)             # 1 балл = 0,5 ₽
-CASHBACK_PERCENT = _env_float("CASHBACK_PERCENT", 5)        # % кешбэка от суммы, оплаченной рублями
+CASHBACK_PERCENT = _env_float("CASHBACK_PERCENT", 3)        # % кешбэка от суммы, оплаченной рублями
 MAX_POINTS_PERCENT = _env_float("MAX_POINTS_PERCENT", 30)   # макс. доля суммы заказа, которую можно оплатить баллами
 
 ALLOWED_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
@@ -1190,7 +1190,7 @@ def max_points_for(goods_total):
 
 
 def cashback_points(paid_rub):
-    """Кешбэк в баллах: round((сумма_рублями * 5%) / 0,5), округление «half up»."""
+    """Кешбэк в баллах: round((сумма_рублями * 3%) / 0,5), округление «half up»."""
     return int(math.floor(paid_rub * CASHBACK_PERCENT / 100 / POINT_VALUE + 0.5 + 1e-9))
 
 

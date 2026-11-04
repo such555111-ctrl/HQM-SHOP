@@ -1601,7 +1601,7 @@ let cart = [];
 let appliedPromo = null; // { code, type, value }
 
 // --- баллы лояльности: 1 балл = 0,5 ₽ ---
-const LOYALTY = { maxPercent: 30, cashbackPercent: 5, pointValue: 0.5 };
+const LOYALTY = { maxPercent: 30, cashbackPercent: 3, pointValue: 0.5 };
 let loyaltyBalance = null;   // null — баланс неизвестен (не Telegram / ошибка сети)
 let usePoints = false;       // тумблер «Списать баллы»
 
@@ -1627,7 +1627,7 @@ function loyaltyCalc(goods){
            balanceRub: round2(balance * pv), availRub: round2(avail * pv), spendRub: round2(spend * pv) };
 }
 
-// Кешбэк баллами: round((сумма_рублями × 5%) / 0,5), округление «half up» — как на сервере.
+// Кешбэк баллами: round((сумма_рублями × 3%) / 0,5), округление «half up» — как на сервере.
 const cashbackPoints = paid => Math.floor(paid * LOYALTY.cashbackPercent / 100 / LOYALTY.pointValue + 0.5 + 1e-9);
 
 // Плавный пересчёт суммы: число «докручивается» до нового значения, блок коротко подсвечивается.
